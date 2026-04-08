@@ -230,7 +230,8 @@ class CreditLimitServiceTest {
     class ReasoningFormat {
 
         @Test
-        void incomeBasedReasoning_containsAllRequiredParts() {
+        void incomeBasedReasoning_noCap() {
+            // 500 * 3 = 1500, under the 2000 cap — no cap language expected
             var response = recommend("500", "100", "200", EmploymentType.EMPLOYED);
             String r = response.reasoning();
 
@@ -239,7 +240,19 @@ class CreditLimitServiceTest {
             assertTrue(r.contains("debt-to-income ratio of 20.00%"));
             assertTrue(r.contains("LOW_RISK category"));
             assertTrue(r.contains("income-based calculation (3x monthly income)"));
+            assertFalse(r.contains("capped at"));
             assertTrue(r.contains("Admin review is recommended before final approval"));
+        }
+
+        @Test
+        void incomeBasedReasoning_withCap() {
+            // 1000 * 3 = 3000, exceeds the 2000 cap — must mention the cap
+            var response = recommend("1000", "100", "200", EmploymentType.EMPLOYED);
+            String r = response.reasoning();
+
+            assertTrue(r.contains("income-based calculation (3x monthly income, capped at the maximum of 2000.000 BHD)"));
+            assertFalse(r.contains("income-based calculation (3x monthly income)."),
+                    "Should not claim 3x income without mentioning the cap");
         }
 
         @Test
@@ -268,6 +281,20 @@ class CreditLimitServiceTest {
             var response = recommend("500", "100", "200", EmploymentType.SELF_EMPLOYED);
             assertTrue(response.reasoning().contains("MEDIUM_RISK category"));
             assertTrue(response.reasoning().contains("1.5x monthly income"));
+        }
+
+        @Test
+        void mediumRisk_cappedAt1000_mentionedInReasoning() {
+            // 800 * 1.5 = 1200, exceeds the 1000 cap
+            var response = recommend("800", "100", "200", EmploymentType.SELF_EMPLOYED);
+            assertTrue(response.reasoning().contains("capped at the maximum of 1000.000 BHD"));
+        }
+
+        @Test
+        void highRisk_cappedAt500_mentionedInReasoning() {
+            // 1200 * 0.5 = 600, exceeds the 500 cap
+            var response = recommend("1200", "100", "200", EmploymentType.UNEMPLOYED);
+            assertTrue(response.reasoning().contains("capped at the maximum of 500.000 BHD"));
         }
     }
 

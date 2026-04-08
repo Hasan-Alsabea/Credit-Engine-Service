@@ -66,8 +66,11 @@ public class CreditLimitService {
         RiskTier riskTier = determineRiskTier(dti, request.employmentType());
 
         // Stage 3: Derive the base credit limit from the tier
-        BigDecimal incomeBasedLimit = calculateBaseLimit(riskTier, request.monthlyIncome());
         BigDecimal multiplier = getMultiplier(riskTier);
+        BigDecimal uncappedLimit = request.monthlyIncome().multiply(multiplier);
+        BigDecimal cap = getCap(riskTier);
+        BigDecimal incomeBasedLimit = uncappedLimit.min(cap);
+        boolean wasCapped = uncappedLimit.compareTo(cap) > 0;
 
         // Check whether the account balance method yields a better offer
         BigDecimal balanceAlternative = request.accountAverageBalance()
@@ -82,7 +85,7 @@ public class CreditLimitService {
         // Build a human-readable explanation of how the decision was made
         String reasoning = buildReasoning(
                 request.monthlyIncome(), dti, riskTier,
-                recommendedLimit, multiplier,
+                recommendedLimit, multiplier, wasCapped, cap,
                 useBalanceMethod, request.accountAverageBalance());
 
         return new CreditLimitResponse(
@@ -110,23 +113,19 @@ public class CreditLimitService {
         return RiskTier.LOW_RISK;
     }
 
-    /**
-     * Applies the tier-specific multiplier to monthly income, capped at the
-     * tier's maximum to limit exposure on high-income applicants.
-     */
-    private BigDecimal calculateBaseLimit(RiskTier riskTier, BigDecimal monthlyIncome) {
-        return switch (riskTier) {
-            case LOW_RISK -> monthlyIncome.multiply(LOW_RISK_MULTIPLIER).min(LOW_RISK_CAP);
-            case MEDIUM_RISK -> monthlyIncome.multiply(MEDIUM_RISK_MULTIPLIER).min(MEDIUM_RISK_CAP);
-            case HIGH_RISK -> monthlyIncome.multiply(HIGH_RISK_MULTIPLIER).min(HIGH_RISK_CAP);
-        };
-    }
-
     private BigDecimal getMultiplier(RiskTier riskTier) {
         return switch (riskTier) {
             case LOW_RISK -> LOW_RISK_MULTIPLIER;
             case MEDIUM_RISK -> MEDIUM_RISK_MULTIPLIER;
             case HIGH_RISK -> HIGH_RISK_MULTIPLIER;
+        };
+    }
+
+    private BigDecimal getCap(RiskTier riskTier) {
+        return switch (riskTier) {
+            case LOW_RISK -> LOW_RISK_CAP;
+            case MEDIUM_RISK -> MEDIUM_RISK_CAP;
+            case HIGH_RISK -> HIGH_RISK_CAP;
         };
     }
 
@@ -137,7 +136,8 @@ public class CreditLimitService {
      */
     private String buildReasoning(BigDecimal monthlyIncome, BigDecimal dti,
                                   RiskTier riskTier, BigDecimal recommendedLimit,
-                                  BigDecimal multiplier, boolean useBalanceMethod,
+                                  BigDecimal multiplier, boolean wasCapped,
+                                  BigDecimal cap, boolean useBalanceMethod,
                                   BigDecimal accountAverageBalance) {
 
         BigDecimal dtiPercent = dti.multiply(HUNDRED).setScale(2, RoundingMode.HALF_UP);
@@ -160,6 +160,10 @@ public class CreditLimitService {
                     "account balance method, as the average balance of %s BHD exceeded " +
                     "the income-based figure, providing a stronger indicator of financial stability. ",
                     accountAverageBalance.setScale(BHD_SCALE, RoundingMode.HALF_UP)));
+        } else if (wasCapped) {
+            sb.append(String.format(
+                    "income-based calculation (%sx monthly income, capped at the maximum of %s BHD). ",
+                    multiplier, cap.setScale(BHD_SCALE, RoundingMode.HALF_UP)));
         } else {
             sb.append(String.format(
                     "income-based calculation (%sx monthly income). ", multiplier));
