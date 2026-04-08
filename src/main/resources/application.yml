@@ -1,0 +1,12 @@
+server:
+  port: 8080
+
+credit:
+  engine:
+    # Default annual percentage rate used when the request doesn't specify one.
+    # Expressed as a whole number (24.0 = 24%).
+    default-apr: 24.0
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
