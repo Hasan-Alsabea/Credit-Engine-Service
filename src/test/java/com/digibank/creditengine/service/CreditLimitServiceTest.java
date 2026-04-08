@@ -26,21 +26,21 @@ class CreditLimitServiceTest {
         @Test
         void highRisk_whenDtiAbove50Percent_employed() {
             var response = recommend("500", "260", "200", EmploymentType.EMPLOYED);
-            // DTI = 260/500 = 0.5200 > 0.50
+            // DTI = 260/500 = 0.5200 > 0.50 — declined with zero limit
             assertEquals(RiskTier.HIGH_RISK, response.riskTier());
             assertEquals(new BigDecimal("0.5200"), response.debtToIncomeRatio());
-            assertEquals(new BigDecimal("250.000"), response.recommendedLimit());
+            assertEquals(new BigDecimal("0.000"), response.recommendedLimit());
         }
 
         @Test
         void highRisk_whenDtiAbove50Percent_selfEmployed() {
             // The exact conflict case: SELF_EMPLOYED with DTI > 0.5
-            // HIGH_RISK must win over MEDIUM_RISK
+            // HIGH_RISK must win over MEDIUM_RISK — declined with zero limit
             var response = recommend("500", "300", "200", EmploymentType.SELF_EMPLOYED);
             // DTI = 300/500 = 0.6000 > 0.50
             assertEquals(RiskTier.HIGH_RISK, response.riskTier());
             assertEquals(new BigDecimal("0.6000"), response.debtToIncomeRatio());
-            assertEquals(new BigDecimal("250.000"), response.recommendedLimit());
+            assertEquals(new BigDecimal("0.000"), response.recommendedLimit());
         }
 
         @Test
@@ -172,17 +172,16 @@ class CreditLimitServiceTest {
         }
 
         @Test
-        void highRisk_multiplierApplied() {
+        void highRisk_alwaysZero() {
             var response = recommend("500", "100", "200", EmploymentType.UNEMPLOYED);
-            // 500 * 0.5 = 250
-            assertEquals(new BigDecimal("250.000"), response.recommendedLimit());
+            // HIGH_RISK is always declined — zero limit regardless of income
+            assertEquals(new BigDecimal("0.000"), response.recommendedLimit());
         }
 
         @Test
-        void highRisk_cappedAt500() {
+        void highRisk_alwaysZero_evenHighIncome() {
             var response = recommend("1200", "100", "200", EmploymentType.UNEMPLOYED);
-            // 1200 * 0.5 = 600, but HIGH_RISK cap is 500
-            assertEquals(new BigDecimal("500.000"), response.recommendedLimit());
+            assertEquals(new BigDecimal("0.000"), response.recommendedLimit());
         }
     }
 
@@ -270,10 +269,10 @@ class CreditLimitServiceTest {
         }
 
         @Test
-        void highRisk_reasoningShowsCorrectMultiplier() {
+        void highRisk_reasoningShowsDeclineMessage() {
             var response = recommend("500", "100", "200", EmploymentType.UNEMPLOYED);
-            assertTrue(response.reasoning().contains("HIGH_RISK category"));
-            assertTrue(response.reasoning().contains("0.5x monthly income"));
+            assertTrue(response.reasoning().contains("exceeds acceptable thresholds"));
+            assertTrue(response.reasoning().contains("Admin should decline this application"));
         }
 
         @Test
@@ -291,10 +290,12 @@ class CreditLimitServiceTest {
         }
 
         @Test
-        void highRisk_cappedAt500_mentionedInReasoning() {
-            // 1200 * 0.5 = 600, exceeds the 500 cap
+        void highRisk_reasoningIsDeclineOnly() {
             var response = recommend("1200", "100", "200", EmploymentType.UNEMPLOYED);
-            assertTrue(response.reasoning().contains("capped at the maximum of 500.000 BHD"));
+            // HIGH_RISK should never mention income-based or balance methods
+            assertFalse(response.reasoning().contains("income-based"));
+            assertFalse(response.reasoning().contains("account balance"));
+            assertTrue(response.reasoning().contains("Admin should decline"));
         }
     }
 
@@ -324,11 +325,20 @@ class CreditLimitServiceTest {
 
         @Test
         void debtExceedsIncome_dtiOver100Percent() {
-            // DTI = 200/100 = 2.0000 — debt is double the income
+            // DTI = 200/100 = 2.0000 — debt is double the income, declined
             var response = recommend("100", "200", "0", EmploymentType.EMPLOYED);
             assertEquals(RiskTier.HIGH_RISK, response.riskTier());
             assertEquals(new BigDecimal("2.0000"), response.debtToIncomeRatio());
-            assertEquals(new BigDecimal("50.000"), response.recommendedLimit());
+            assertEquals(new BigDecimal("0.000"), response.recommendedLimit());
+        }
+
+        @Test
+        void highRisk_ignoresHighBalance() {
+            // HIGH_RISK must return 0 even when account balance is massive
+            var response = recommend("1000", "600", "50000", EmploymentType.EMPLOYED);
+            assertEquals(RiskTier.HIGH_RISK, response.riskTier());
+            assertEquals(new BigDecimal("0.000"), response.recommendedLimit());
+            assertFalse(response.reasoning().contains("account balance"));
         }
 
         @Test

@@ -65,14 +65,25 @@ public class CreditLimitService {
         // Stage 2: Map DTI + employment type to a risk tier
         RiskTier riskTier = determineRiskTier(dti, request.employmentType());
 
-        // Stage 3: Derive the base credit limit from the tier
+        // HIGH_RISK customers are declined outright — no credit extension regardless of balance
+        if (riskTier == RiskTier.HIGH_RISK) {
+            return new CreditLimitResponse(
+                    BigDecimal.ZERO.setScale(BHD_SCALE),
+                    riskTier,
+                    dti,
+                    "Customer's debt-to-income ratio exceeds acceptable thresholds for credit extension. " +
+                    "Credit limit cannot be recommended. Admin should decline this application."
+            );
+        }
+
+        // Stage 3: Derive the base credit limit from the tier (LOW_RISK / MEDIUM_RISK only)
         BigDecimal multiplier = getMultiplier(riskTier);
         BigDecimal uncappedLimit = request.monthlyIncome().multiply(multiplier);
         BigDecimal cap = getCap(riskTier);
         BigDecimal incomeBasedLimit = uncappedLimit.min(cap);
         boolean wasCapped = uncappedLimit.compareTo(cap) > 0;
 
-        // Check whether the account balance method yields a better offer
+        // Account balance override — only available for LOW_RISK and MEDIUM_RISK
         BigDecimal balanceAlternative = request.accountAverageBalance()
                 .multiply(BALANCE_ALTERNATIVE_FACTOR)
                 .setScale(BHD_SCALE, RoundingMode.HALF_UP);
